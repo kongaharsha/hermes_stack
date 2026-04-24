@@ -1,0 +1,19 @@
+# Drafts — local only, never pushed
+posts/
+
+# macOS
+.DS_Store
+
+# Editor cruft
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node/Bun if anyone ends up running JS in a skill
+node_modules/
+
+# Env files in case a skill later needs one
+.env
+.env.local

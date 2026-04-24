@@ -1,0 +1,117 @@
+---
+name: airline-checkin
+description: Automate airline check-in via local CDP-controlled Chrome. Handles KTN, loyalty, baggage, and survey popups. Resilient to anti-bot WAFs that block cloud browser agents.
+---
+
+# Airline Check-in
+
+Automates airline online check-in using a locally-controlled Chrome instance (via CDP). Cloud browsers (Browserbase, standard `browser_navigate`) are blocked by airline anti-bot WAFs. The working path is: local Chrome for Testing, then `playwright-core` `connectOverCDP()`, then drive the browser.
+
+## Status
+
+Working path verified on a major US carrier (Apr 2026). Pattern expected to generalize to other airlines with similar anti-bot posture.
+
+## Required user data
+
+Skill reads personal data from `~/brain/concepts/`:
+
+- `loyalty-info.md` — traveler identity: loyalty numbers, KTN, Global Entry, passport
+- `airline-preferences.md` — baggage default, seat preferences per airline
+
+If these files don't exist, the setup script populates templates. User fills them in.
+
+## Pre-checkin checklist
+
+Before triggering automation, verify:
+
+1. **KTN** is documented for the traveler in `loyalty-info.md`
+2. **Loyalty number** is active on the reservation (may require pre-linking in airline profile)
+3. **Baggage plan** is determined (carry-on vs 1 checked vs other). Ask user if ambiguous.
+4. **Airline security stance**. If the airline blocks cloud agents (Browserbase, etc.), use local CDP (default).
+
+## Browser control
+
+Uses local Chrome for Testing via CDP:
+
+- **Binary:** `~/.agent-browser/` (Chrome for Testing)
+- **Port:** `--remote-debugging-port=9222`
+- **Profile:** `--user-data-dir=<persistent-path>` so cookies and sessions persist across runs
+- **Stealth flags:** `--disable-blink-features=AutomationControlled`, `--password-store=basic`, `--use-mock-keychain`
+- **Driver:** `playwright-core` via `connectOverCDP()`, not raw websocket. CDP handles navigation and context lifecycle much more reliably.
+- **Mode:** always headed/visible for monitoring
+
+### Pre-flight cleanup
+
+Before launching, clear stale sessions to avoid SingletonLock errors and WAF resets:
+
+```bash
+pkill -9 -f "Chrome for Testing" 2>/dev/null || true
+lsof -i TCP:9222 | xargs pkill 2>/dev/null || true
+rm -f <user-data-dir>/SingletonLock <user-data-dir>/SingletonCookie
+```
+
+## Workflow
+
+1. **Launch** Chrome with the flags above
+2. **Navigate** to airline check-in URL
+3. **Dismiss** cookie banners and survey popups (Qualtrics, OneTrust, etc.). Remove via DOM if click-intercepted (see below).
+4. **Enter** confirmation code and traveler last name
+5. **Verify** KTN present on reservation. Inject if missing and UI allows.
+6. **Seat**. Accept assigned or select per preferences.
+7. **Baggage**. Select per user preference or skip.
+8. **Hazmat**. Accept standard policy.
+9. **Boarding pass**. Request email or SMS delivery.
+
+## Resilience patterns
+
+These are hard-won from field testing. Most airline portals have these gotchas.
+
+### Survey and cookie overlays block clicks
+
+Airline portals frequently inject Qualtrics or OneTrust overlays that intercept clicks silently. Before every click-heavy step:
+
+```js
+document.querySelectorAll('[id*=survey], [class*=QSI]').forEach(el => el.remove());
+```
+
+### Standard page.click() gets intercepted
+
+When invisible modal overlays are in the way, `page.click()` succeeds silently but nothing happens. Force-click via JS for critical path buttons (Continue, Accept, Submit):
+
+```js
+el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+```
+
+For submit buttons, iterate bottom-of-page buttons in the DOM tree if standard selectors miss.
+
+### KTN fields go invisible if not focused
+
+The KTN input can render as invisible or reset if it isn't actively focused. Use `page.fill()` followed by `page.focus()`, then visually re-verify the input value. Verify TSA PreCheck status on the traveler details review page after saving.
+
+### SPA navigation does not always trigger refresh
+
+If an interaction appears to succeed but `page.url()` does not advance, the SPA may have dropped the nav. Re-check page state and force-click the exact button via `evaluate`.
+
+### Flow persistence on page navigation
+
+After navigation, do not hold stale page object references. Re-fetch via `context.pages()`.
+
+### Wait trigger: domcontentloaded, not networkidle
+
+`networkidle` hangs indefinitely on airline portals due to third-party tracking scripts. Use `domcontentloaded`.
+
+### Cookie banner timing
+
+Handle the cookie banner BEFORE logging in or entering search criteria. Otherwise it interferes with DOM selection on the next step.
+
+## Other pitfalls
+
+- **Heredoc complexity:** Do not put multi-line JS in `node -e`. Write to `/tmp/checkin.js` first, then run `node /tmp/checkin.js`.
+- **PNR confusion:** Six-character codes are PNRs, not flight numbers. Tracking APIs fail on PNRs; only the airline portal works.
+- **Identity consistency:** The logged-in loyalty profile must match the reservation traveler for KTN and seat preferences to attach.
+
+## Post-action
+
+- **Verify** KTN appears on the boarding pass preview
+- **Deliver** boarding pass link via SMS or email
+- **Log** result in `~/brain/logs/airline-checkins.md` with date, confirmation code, seat, boarding pass link
