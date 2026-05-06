@@ -33,7 +33,7 @@ You → Telegram → Hermes → reads gbrain for context
                         → writes back to gbrain
 ```
 
-## The two skills
+## The three skills
 
 ### Airline check-in
 
