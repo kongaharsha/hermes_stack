@@ -51,6 +51,14 @@ Asks for explicit confirmation before each critical step. I've had enough automa
 
 [See the full skill →](skills/laundry-booking/SKILL.md)
 
+### House inventory
+
+Text the bot with a description or photo of items you're storing or cataloging. It correctly indexes objects into a standardized container hierarchy and maintains a searchable home inventory for you.
+
+Helps keep track of storage boxes and move-planning by converting visual data into a structured Markdown inventory in your brain.
+
+[See the full skill →](skills/house-inventory/SKILL.md)
+
 ## Install
 
 A Mac with Terminal access, a Telegram account, and about 45 minutes.
